@@ -13,10 +13,13 @@ The logo will visualize the nucleotide frequency distribution at each position.
 
 # Input for sequences
 st.sidebar.header("Input Sequences")
-sequence_input = st.sidebar.text_area("Enter sequences (one per line)", value="ACGT\nACGA\nACGT\nACTT\nACGG\nACGA")
+sequence_input = st.sidebar.text_area(
+    "Enter sequences (one per line)", 
+    value="ACGT\nACGA\nACGT\nACTT\nACGG\nACGA"
+)
 
 # Convert input into a list of sequences
-sequences = sequence_input.splitlines()
+sequences = [seq.strip().upper() for seq in sequence_input.splitlines() if seq.strip()]
 
 # Calculate nucleotide frequencies per position
 def nucleotide_frequencies(sequences):
@@ -25,26 +28,49 @@ def nucleotide_frequencies(sequences):
     freq_matrix = pd.DataFrame(freqs).T
     return freq_matrix.div(freq_matrix.sum(axis=1), axis=0).fillna(0)
 
-# Generate the frequency matrix
-freq_matrix = nucleotide_frequencies(sequences)
-
-# Create a sequence logo using logomaker
-if len(sequences) > 0:
-    st.subheader("Generated Sequence Logo")
+# Only proceed if valid sequences are entered
+if len(sequences) > 0 and all(len(seq) == len(sequences[0]) for seq in sequences):
     
+    # Generate the frequency matrix
+    freq_matrix = nucleotide_frequencies(sequences)
+
+    # Sequence logo
+    st.subheader("Generated Sequence Logo")
     fig, ax = plt.subplots(figsize=(10, 5))
     logo = logomaker.Logo(freq_matrix, ax=ax)
     logo.style_spines(visible=False)
     logo.style_xticks(rotation=0, fmt='%d', anchor=0)
     logo.ax.set_ylabel("Probability")
-    
     st.pyplot(fig)
-else:
-    st.write("Please enter valid sequences.")
 
-# Add a download button for the logo
-st.sidebar.subheader("Download Options")
-if st.sidebar.button('Download Logo as PNG'):
-    fig.savefig('sequence_logo.png')
-    with open("sequence_logo.png", "rb") as file:
-        btn = st.sidebar.download_button(label="Download Logo", data=file, file_name="sequence_logo.png", mime="image/png")
+    # Consensus sequence
+    consensus = ''.join(freq_matrix.idxmax(axis=1))
+    st.subheader("Consensus Sequence")
+    st.code(consensus)
+
+    # Frequency matrix table
+    st.subheader("Frequency Matrix (per position)")
+    st.dataframe(freq_matrix)
+
+    # Download options
+    st.sidebar.subheader("Download Options")
+    if st.sidebar.button('Download Logo as PNG'):
+        fig.savefig('sequence_logo.png')
+        with open("sequence_logo.png", "rb") as file:
+            st.sidebar.download_button(
+                label="Download Logo", 
+                data=file, 
+                file_name="sequence_logo.png", 
+                mime="image/png"
+            )
+
+    csv = freq_matrix.to_csv().encode('utf-8')
+    st.sidebar.download_button(
+        label="Download Frequency Matrix (CSV)",
+        data=csv,
+        file_name='frequency_matrix.csv',
+        mime='text/csv'
+    )
+
+else:
+    st.write("⚠️ Please enter valid aligned sequences (all sequences must be same length).")
