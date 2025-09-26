@@ -15,7 +15,7 @@ The logo will visualize the nucleotide frequency distribution at each position.
 st.sidebar.header("Input Sequences")
 sequence_input = st.sidebar.text_area(
     "Enter sequences (one per line)", 
-    value="ACGT\nACGA\nACGT\nACTT\nACGG\nACGA"
+    value="TGTGGAATTG\nTGTGGAAGTG\nTGTGGACTGG"
 )
 
 # Convert input into a list of sequences
