@@ -74,3 +74,8 @@ if len(sequences) > 0 and all(len(seq) == len(sequences[0]) for seq in sequences
 
 else:
     st.write("⚠️ Please enter valid aligned sequences (all sequences must be same length).")
+
+
+
+
+
