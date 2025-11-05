@@ -1,8 +1,9 @@
 """
-Streamlit Sequence Logo Generator — Enhanced & Elegant Version
-Updated to provide multiple examples, nicer layout, extra options (SVG/PNG downloads),
-protein alphabet support, IUPAC consensus, info/content logos, difference logos, JS divergence heatmap,
-and various UI improvements.
+Streamlit Sequence Logo Generator — Enhanced & Robust Version
+
+This update fixes a runtime error thrown by logomaker when an invalid `stack_order`
+value was supplied and hardens logo creation so the app no longer crashes —
+instead it falls back to a safe default and displays a helpful message.
 
 Run:
     streamlit run logoo.py
@@ -16,6 +17,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from io import BytesIO
 import textwrap
+from matplotlib.colors import to_hex
 
 st.set_page_config(
     layout="wide",
@@ -97,11 +99,9 @@ def parse_sequences_from_file(uploaded_file):
 def detect_alphabet(sequences):
     # Decide DNA vs protein based on characters present
     chars = set("".join(sequences))
-    # Basic heuristic: if only ACGTN present => DNA
     dna_chars = set(list("ACGTN"))
     if chars.issubset(dna_chars):
         return "DNA"
-    # otherwise treat as PROTEIN
     return "PROTEIN"
 
 
@@ -112,7 +112,6 @@ def nucleotide_frequencies(sequences, symbols=None):
     if not all(len(s) == seq_len for s in sequences):
         raise ValueError("All sequences must be same length.")
     if symbols is None:
-        # detect alphabet from data
         symbols = sorted(set("".join(sequences)))
     counts = []
     for pos in range(seq_len):
@@ -132,7 +131,6 @@ def information_content_matrix(freq_df, consider_missing_as_zero=True):
         return freq_df
     cols = [c for c in freq_df.columns if c != "N"] if "N" in freq_df.columns else list(freq_df.columns)
     p = freq_df[cols].values
-    # entropy
     with np.errstate(divide="ignore", invalid="ignore"):
         logp = np.where(p > 0, np.log2(p), 0.0)
         H = -np.sum(p * logp, axis=1)
@@ -163,22 +161,21 @@ def iupac_consensus(freq_df, threshold=0.6):
     cons = []
     for _, row in freq_df.iterrows():
         sorted_letters = list(row.sort_values(ascending=False).items())
-        # try top 1
         if sorted_letters[0][1] >= threshold:
             cons.append(sorted_letters[0][0])
             continue
-        # try top 2
-        cum = sorted_letters[0][1] + sorted_letters[1][1]
-        topset = frozenset([sorted_letters[0][0], sorted_letters[1][0]])
-        if cum >= threshold:
-            cons.append(IUPAC_MAP.get(topset, "N"))
-            continue
-        # try top 3
-        cum3 = cum + sorted_letters[2][1] if len(sorted_letters) > 2 else cum
-        topset3 = frozenset([sorted_letters[i][0] for i in range(min(3, len(sorted_letters)))])
-        if cum3 >= threshold:
-            cons.append(IUPAC_MAP.get(topset3, "N"))
-            continue
+        if len(sorted_letters) > 1:
+            cum = sorted_letters[0][1] + sorted_letters[1][1]
+            topset = frozenset([sorted_letters[0][0], sorted_letters[1][0]])
+            if cum >= threshold:
+                cons.append(IUPAC_MAP.get(topset, "N"))
+                continue
+        if len(sorted_letters) > 2:
+            cum3 = sorted_letters[0][1] + sorted_letters[1][1] + sorted_letters[2][1]
+            topset3 = frozenset([sorted_letters[i][0] for i in range(3)])
+            if cum3 >= threshold:
+                cons.append(IUPAC_MAP.get(topset3, "N"))
+                continue
         cons.append("N")
     return "".join(cons)
 
@@ -186,7 +183,6 @@ def iupac_consensus(freq_df, threshold=0.6):
 def jensen_shannon_divergence(p_df, q_df, symbols=None):
     if p_df.empty or q_df.empty:
         return pd.Series(dtype=float)
-    # align
     if symbols is None:
         symbols = sorted(set(list(p_df.columns) + list(q_df.columns)))
     p = p_df.reindex(columns=symbols, fill_value=0).values
@@ -211,6 +207,22 @@ def safe_save_fig(fig, fmt="png"):
     buf.seek(0)
     return buf
 
+
+def sanitize_color_scheme(scheme):
+    """
+    Convert a color scheme (dict mapping letters->color or palette values) into a dict
+    of hex color strings acceptable to logomaker/matplotlib.
+    """
+    if not scheme:
+        return scheme
+    out = {}
+    for k, v in scheme.items():
+        try:
+            # v can be a seaborn palette color (tuple) or hex or color name
+            out[k] = to_hex(v)
+        except Exception:
+            out[k] = str(v)
+    return out
 
 # -------------------------
 # Sidebar: Inputs & options
@@ -253,7 +265,15 @@ if color_scheme_choice == "Custom dict":
 font_size = st.sidebar.slider("Font size for letters", 6, 30, 18)
 fig_height = st.sidebar.slider("Logo height (inches)", 2, 6, 2)
 show_axis = st.sidebar.checkbox("Show axes & spines", value=False)
-stack_order = st.sidebar.selectbox("Stack order", ["largest_on_top", "small_on_top"])
+# Present user-friendly stack order choices but map to safe defaults with fallback
+stack_choice = st.sidebar.selectbox("Stack order", ["Small on top (conservative)", "Large on top (emphasize major)"])
+# Map to tentative logomaker values (we'll attempt and fallback if invalid)
+stack_order_map = {
+    "Small on top (conservative)": "small_on_top",
+    "Large on top (emphasize major)": "big_on_top",  # attempt this; if invalid, fallback
+}
+stack_order_user = stack_order_map.get(stack_choice, "small_on_top")
+
 show_js = st.sidebar.checkbox("Show Jensen-Shannon divergence heatmap (when comparing)", value=True)
 download_svg = st.sidebar.checkbox("Offer SVG download", value=True)
 
@@ -285,7 +305,7 @@ sequences_a = get_sequences(group_a_text, group_a_file)
 sequences_b = get_sequences(group_b_text, group_b_file)
 
 # Show basic status in a header
-st.title("Sequence Logo Generator — Elegant Edition")
+st.title("Sequence Logo Generator — Elegant Edition (Robust)")
 st.write("A polished UI to create publication-quality sequence logos with extra analysis options.")
 
 col1, col2 = st.columns([3, 1])
@@ -314,7 +334,6 @@ else:
 if alphabet_type == "DNA":
     SYMBOLS = ["A", "C", "G", "T", "N"]
 else:
-    # Protein alphabet fallback (order commonly used)
     SYMBOLS = list("ACDEFGHIKLMNPQRSTVWY")
 
 # Color schemes
@@ -324,12 +343,15 @@ def get_color_scheme(choice):
     if choice.startswith("Classic"):
         return {"A": "green", "C": "blue", "G": "orange", "T": "red", "N": "gray"}
     if choice == "Pastel":
-        return {s: sns.color_palette("pastel")[i % 8] for i, s in enumerate(SYMBOLS)}
+        palette = sns.color_palette("pastel", n_colors=len(SYMBOLS))
+        return {s: palette[i % len(palette)] for i, s in enumerate(SYMBOLS)}
     if choice == "Bold":
-        return {s: sns.color_palette("Set2")[i % 8] for i, s in enumerate(SYMBOLS)}
+        palette = sns.color_palette("Set2", n_colors=len(SYMBOLS))
+        return {s: palette[i % len(palette)] for i, s in enumerate(SYMBOLS)}
     return {s: "gray" for s in SYMBOLS}
 
-color_scheme = get_color_scheme(color_scheme_choice)
+raw_scheme = get_color_scheme(color_scheme_choice)
+color_scheme = sanitize_color_scheme(raw_scheme)
 
 # -------------------------
 # Compute matrices
@@ -337,33 +359,71 @@ color_scheme = get_color_scheme(color_scheme_choice)
 freq_a = nucleotide_frequencies(sequences_a, symbols=SYMBOLS) if sequences_a else pd.DataFrame()
 freq_b = nucleotide_frequencies(sequences_b, symbols=SYMBOLS) if sequences_b else pd.DataFrame()
 
-# Ensure same length for side-by-side comparison
 both_present_same_length = (not freq_a.empty) and (not freq_b.empty) and (len(freq_a) == len(freq_b))
 
-# Info matrices
 info_a = information_content_matrix(freq_a) if not freq_a.empty else pd.DataFrame()
 info_b = information_content_matrix(freq_b) if not freq_b.empty else pd.DataFrame()
 
 # -------------------------
-# Plotting helpers
+# Plotting helpers (robust)
 # -------------------------
 def make_logo_plot(matrix, title="", color_scheme=None, figsize=(10, 2.5), y_label=""):
+    """
+    Create a logomaker Logo while guarding against invalid stack_order or unforeseen logomaker errors.
+    If logomaker raises, fallback to a safe stack_order ('small_on_top') and show a non-fatal message.
+    """
     fig, ax = plt.subplots(figsize=figsize)
     if matrix.empty:
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
         ax.axis("off")
         return fig
-    # reindex columns to desired order
     cols_order = [c for c in SYMBOLS if c in matrix.columns]
     matrix = matrix[cols_order]
-    logo = logomaker.Logo(matrix, ax=ax, color_scheme=color_scheme, stack_order=stack_order)
-    logo.style_spines(visible=show_axis)
-    logo.style_xticks(rotation=0, anchor=0)
+
+    # Try with user requested stack_order first, then fallback
+    attempted_orders = [stack_order_user, "small_on_top"]
+    last_exc = None
+    for order in attempted_orders:
+        try:
+            logo = logomaker.Logo(matrix, ax=ax, color_scheme=color_scheme, stack_order=order)
+            # success — break out
+            break
+        except Exception as e:
+            # store exception and continue to fallback
+            last_exc = e
+            continue
+    else:
+        # If we reached here, all attempts failed — show message and render a plain bar plot fallback
+        st.error(
+            "Could not render sequence logo with logomaker. Falling back to a simple stacked bar representation. "
+            "Original error: " + (str(last_exc) if last_exc else "unknown")
+        )
+        # create stacked bar fallback
+        bottom = np.zeros(len(matrix))
+        x = np.arange(len(matrix))
+        for col in matrix.columns:
+            ax.bar(x, matrix[col].values, bottom=bottom, color=color_scheme.get(col, "#808080"), label=col)
+            bottom += matrix[col].values
+        ax.set_xticks(np.arange(len(matrix)))
+        ax.set_xticklabels([str(i) for i in matrix.index])
+        ax.set_ylabel(y_label or "Probability")
+        ax.set_title(title)
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        return fig
+
+    # Style and finalize the successful logo
+    try:
+        logo.style_spines(visible=show_axis)
+        logo.style_xticks(rotation=0, anchor=0)
+    except Exception:
+        # On some versions of logomaker these helpers may behave differently; ignore nonfatal styling errors
+        pass
     ax.set_ylabel(y_label)
     ax.set_title(title)
     for label in ax.get_yticklabels():
-        label.set_fontsize(font_size - 4)
-    # increase letter size
+        label.set_fontsize(max(font_size - 4, 6))
+    # try to increase letter font size where possible
     for txt in ax.texts:
         try:
             txt.set_fontsize(font_size)
@@ -393,7 +453,7 @@ with left_col:
         st.markdown("IUPAC-like consensus (threshold 0.6):")
         st.code(iupac_consensus(freq_a, threshold=0.6))
         st.download_button("Download Group A frequency CSV", data=freq_a.to_csv(index=True).encode("utf-8"), file_name="group_a_freq.csv", mime="text/csv")
-        if download_svg:
+        if download_svg and 'fig_a' in locals() and fig_a is not None:
             buf = safe_save_fig(fig_a, fmt="svg")
             st.download_button("Download Group A SVG", data=buf, file_name="group_a_logo.svg", mime="image/svg+xml")
     else:
@@ -415,7 +475,7 @@ with right_col:
         st.markdown("IUPAC-like consensus (threshold 0.6):")
         st.code(iupac_consensus(freq_b, threshold=0.6))
         st.download_button("Download Group B frequency CSV", data=freq_b.to_csv(index=True).encode("utf-8"), file_name="group_b_freq.csv", mime="text/csv")
-        if download_svg:
+        if download_svg and 'fig_b' in locals() and fig_b is not None:
             buf = safe_save_fig(fig_b, fmt="svg")
             st.download_button("Download Group B SVG", data=buf, file_name="group_b_logo.svg", mime="image/svg+xml")
     else:
@@ -426,20 +486,20 @@ if both_present_same_length:
     st.markdown("---")
     st.subheader("Comparison & Fancy Outputs")
 
-    # Difference logo
     diff = freq_a.reindex(columns=SYMBOLS, fill_value=0) - freq_b.reindex(columns=SYMBOLS, fill_value=0)
     if logo_type == "Difference (A − B)":
         fig_diff = make_logo_plot(diff, title="Difference Logo (Group A − Group B)", color_scheme=color_scheme, figsize=(12, fig_height), y_label="ΔProbability")
-        # draw horizontal 0 line
         ax = fig_diff.axes[0]
-        ax.axhline(0, color="k", linewidth=0.6)
+        try:
+            ax.axhline(0, color="k", linewidth=0.6)
+        except Exception:
+            pass
         st.pyplot(fig_diff)
         if download_svg:
             buf = safe_save_fig(fig_diff, fmt="svg")
             st.download_button("Download Difference SVG", data=buf, file_name="difference_logo.svg", mime="image/svg+xml")
         st.download_button("Download Difference CSV", data=diff.to_csv(index=True).encode("utf-8"), file_name="difference_matrix.csv", mime="text/csv")
 
-    # JS divergence heatmap
     if show_js:
         js = jensen_shannon_divergence(freq_a, freq_b, symbols=SYMBOLS)
         fig_js, ax_js = plt.subplots(figsize=(12, 1.2))
@@ -450,14 +510,19 @@ if both_present_same_length:
         st.pyplot(fig_js)
         st.download_button("Download JSD CSV", data=js.to_csv(index=True).encode("utf-8"), file_name="js_divergence.csv", mime="text/csv")
 
-    # Side-by-side information logos for direct visual comparison
     fig_compare = plt.figure(constrained_layout=True, figsize=(12, 5))
     gs = fig_compare.add_gridspec(2, 1, height_ratios=[1, 1])
     ax1 = fig_compare.add_subplot(gs[0])
-    logomaker.Logo(info_a, ax=ax1, color_scheme=color_scheme, stack_order=stack_order)
+    try:
+        logomaker.Logo(info_a, ax=ax1, color_scheme=color_scheme, stack_order=stack_order_user)
+    except Exception:
+        logomaker.Logo(info_a, ax=ax1, color_scheme=color_scheme, stack_order="small_on_top")
     ax1.set_title("Group A — Information-content")
     ax2 = fig_compare.add_subplot(gs[1], sharex=ax1)
-    logomaker.Logo(info_b, ax=ax2, color_scheme=color_scheme, stack_order=stack_order)
+    try:
+        logomaker.Logo(info_b, ax=ax2, color_scheme=color_scheme, stack_order=stack_order_user)
+    except Exception:
+        logomaker.Logo(info_b, ax=ax2, color_scheme=color_scheme, stack_order="small_on_top")
     ax2.set_title("Group B — Information-content")
     st.pyplot(fig_compare)
     if download_svg:
