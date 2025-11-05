@@ -2,3 +2,4 @@ streamlit
 logomaker
 pandas
 matplotlib
+seaborn
