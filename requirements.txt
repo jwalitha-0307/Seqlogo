@@ -2,4 +2,4 @@ streamlit
 logomaker
 pandas
 matplotlib
-Biopython
+
