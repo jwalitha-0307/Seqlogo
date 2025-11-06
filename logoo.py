@@ -5,8 +5,9 @@ protein alphabet support, IUPAC consensus, info/content logos, difference logos,
 and various UI improvements.
 
 Run:
-    streamlit run logoo.py
+    streamlit run logoo_modified.py
 """
+import warnings
 import streamlit as st
 import logomaker
 import pandas as pd
@@ -356,14 +357,25 @@ def make_logo_plot(matrix, title="", color_scheme=None, figsize=(10, 2.5), y_lab
     # reindex columns to desired order
     cols_order = [c for c in SYMBOLS if c in matrix.columns]
     matrix = matrix[cols_order]
-    logo = logomaker.Logo(matrix, ax=ax, color_scheme=color_scheme, stack_order=stack_order)
-    logo.style_spines(visible=show_axis)
-    logo.style_xticks(rotation=0, anchor=0)
+    # Try creating the Logo using a provided stack_order, but fall back if invalid.
+    try:
+        logo = logomaker.Logo(matrix, ax=ax, color_scheme=color_scheme, stack_order=stack_order)
+    except Exception as e:
+        # Optionally log or print the exact stack_order for debugging
+        warnings.warn(f"logomaker rejected stack_order={stack_order!r}: {e}. Falling back to default stack ordering.")
+        # Fallback: create the logo without passing stack_order (use library default)
+        logo = logomaker.Logo(matrix, ax=ax, color_scheme=color_scheme)
+    # Style and labels
+    try:
+        logo.style_spines(visible=show_axis)
+        logo.style_xticks(rotation=0, anchor=0)
+    except Exception:
+        pass
     ax.set_ylabel(y_label)
     ax.set_title(title)
     for label in ax.get_yticklabels():
         label.set_fontsize(font_size - 4)
-    # increase letter size
+    # increase letter size if logomaker stored text objects
     for txt in ax.texts:
         try:
             txt.set_fontsize(font_size)
