@@ -1,5 +1,6 @@
-streamlit
-logomaker
+biopython
 pandas
+numpy
 matplotlib
-seaborn
+logomaker
+streamlit
